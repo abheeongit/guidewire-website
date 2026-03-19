@@ -1,0 +1,79 @@
+﻿@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700;800&display=swap");
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", "Segoe UI", sans-serif;
+  --font-heading: "Plus Jakarta Sans", "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+}
+
+@layer base {
+  :root {
+    color: #e2e8f0;
+    background-color: #000000;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply antialiased font-sans text-slate-400;
+    background-color: #000000;
+    min-width: 320px;
+    margin: 0;
+  }
+
+  .theme-dark select {
+    color-scheme: dark;
+  }
+
+  .theme-dark select option {
+    background-color: #09090b;
+    color: #f4f4f5;
+  }
+
+  .theme-light select {
+    color-scheme: light;
+  }
+
+  .theme-light select option {
+    background-color: #ffffff;
+    color: #18181b;
+  }
+
+  h1, h2, h3, h4 {
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+    @apply font-heading;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+}
+
+::selection {
+  background-color: rgba(34, 197, 94, 0.4);
+  color: #fff;
+  text-shadow: 0 0 8px rgba(34, 197, 94, 0.6);
+}
+
+@media (pointer: fine) {
+  body {
+    cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path d="M5 3l16 9-7 2-3 10L5 3z" fill="%23060b14" stroke="%2322c55e" stroke-width="1.5" stroke-linejoin="round"/></svg>') 5 3, auto !important;
+  }
+  a, button, [role="button"], input:not([type="text"]):not([type="number"]), select {
+    cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path d="M12 14V6a2 2 0 014 0v9v-2a2 2 0 014 0v2v-1a2 2 0 014 0v6a7 7 0 01-7 7h-2a7 7 0 01-7-7v-8a2 2 0 012-2z" fill="%23060b14" stroke="%2322c55e" stroke-width="1.5" stroke-linejoin="round"/></svg>') 12 7, pointer !important;
+  }
+  input[type="text"], input[type="number"], textarea, p, h1, h2, h3, h4, span, li, label, strong {
+    cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path d="M12 4h8M16 4v24M12 28h8" fill="none" stroke="%2322c55e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="filter:drop-shadow(0px 0px 4px rgba(34,197,94,0.5))"/></svg>') 16 16, text !important;
+  }
+}
+
+
+
