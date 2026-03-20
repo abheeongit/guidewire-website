@@ -1,48 +1,40 @@
-# 🛡 Valor Shield
+# Valor Shield
 
-## 🚀 Overview
-Valor Shield is an AI-powered parametric micro-insurance platform designed to protect gig delivery workers from income loss caused by external disruptions such as extreme weather, pollution, and urban restrictions.
+## Overview
+Valor Shield is a parametric micro-insurance product for gig delivery workers.
 
-Workers subscribe to a weekly insurance plan and receive automatic compensation when disruptions prevent them from working.
+The idea is simple: workers pay a weekly premium, and payouts are triggered when verified external disruptions (for example heavy rain, pollution spikes, or city restrictions) reduce their ability to work.
 
----
+## Problem
+Delivery workers can lose a meaningful part of daily income because of conditions they cannot control.
 
-## 🎯 Problem Statement
-Gig delivery workers (Swiggy, Zomato, Amazon, etc.) lose a significant portion of their income due to uncontrollable external factors like heavy rain, extreme heat, or high pollution levels.
+Most existing insurance products are not designed for this type of short-cycle, disruption-driven income risk.
 
-Currently, there is no system to protect their daily earnings during such disruptions.
+## Solution
+Valor Shield combines disruption monitoring with claim validation and automated payouts.
 
----
+Core flow:
+- Worker selects a weekly plan
+- System monitors disruption signals in the active region
+- Risk and legitimacy checks run continuously
+- Eligible claims are processed with minimal manual intervention
 
-## 💡 Solution
-Valor Shield provides a parametric insurance system where:
-- Workers pay a small weekly premium
-- External disruptions are monitored in real-time
-- AI validates the legitimacy of the disruption and impact
-- Compensation is automatically triggered without manual claims
+## Key Features
+- Hyper-local risk map
+- Dynamic premium logic
+- Predictive disruption alerts
+- Fraud detection and claim validation
+- Income stability dashboard
+- Automatic parametric claim processing
 
----
-
-## ⚡ Key Features
-- 🗺 Hyper-local risk heatmap
-- 🤖 AI-based dynamic premium pricing
-- 🌦 Predictive disruption alerts
-- 🕵 Fraud detection system
-- 📊 Income stability dashboard
-- ⚡ Automatic claim processing (parametric triggers)
-
----
-
-## 🧠 AI Integration (BRAN Engine)
-Our AI system (BRAN) performs:
-- Risk prediction
+## BRAN Engine
+BRAN is the decision layer used for:
+- Risk scoring
 - Fraud detection
 - Activity validation
-- Smart payout adjustment
+- Payout recommendation
 
----
-
-## 💰 Weekly Plans
+## Weekly Plans
 
 | Plan | Premium | Coverage |
 |------|--------|----------|
@@ -50,25 +42,52 @@ Our AI system (BRAN) performs:
 | Premium | ₹35 | ₹350 |
 | Elite | ₹50 | ₹500 |
 
----
-
-## ⚙️ Tech Stack
-
+## Tech Stack
 Frontend: React  
 Backend: FastAPI  
 AI/ML: Python (Scikit-learn, Pandas, NumPy)  
 Database: PostgreSQL  
-APIs: Weather, AQI, Traffic  
+External APIs: Weather, AQI, Traffic  
 Payments: Wallet / Razorpay (Test Mode)
 
----
+## Workflow
+User -> Select Plan -> Monitoring -> Disruption Detected -> AI Validation -> Payout
 
-## 🔄 Workflow
-User → Select Plan → Monitoring → Disruption Detected → AI Validation → Payout
+## What Is Different
+Valor Shield uses parametric triggers, but does not rely on triggers alone.
 
----
+A second validation layer checks worker activity and fraud signals before payout decisions.
 
-## 🏆 Unique Selling Point
-Unlike traditional systems, ValorShield combines parametric triggers with AI-based validation and activity analysis to ensure accurate, fraud-resistant payouts.
+## Adversarial Defense & Anti-Spoofing Strategy
 
----
+### 1) The Differentiation
+The system does not make decisions from GPS alone.
+
+Each claim is evaluated on three tracks:
+- Disruption truth: whether external conditions in that region and time window were actually severe
+- Work continuity: expected vs actual work pattern for that worker profile and shift
+- Trust integrity: whether device/session behavior is consistent with normal usage
+
+When these tracks align, claims can be auto-approved. When they conflict, claims are routed to review instead of immediate denial.
+
+### 2) The Data
+To detect organized spoofing and collusion, the model uses signals beyond location coordinates:
+- Route quality and movement plausibility (teleport jumps, impossible speed changes)
+- Sensor consistency (heading/accelerometer vs movement claims)
+- Geofence context (pickup/drop clusters, no-service zones, timestamp alignment)
+- Network patterns (IP/ASN switching, VPN/proxy behavior during claim windows)
+- Device integrity (device continuity, emulator/root/jailbreak indicators)
+- Worker baseline behavior (shift rhythm, zone transitions, completion variance)
+- Ring-level graph links (shared devices, shared network signatures, synchronized claim timing)
+
+These features are scored with anomaly detection and supervised models, with thresholding tuned for explainability.
+
+### 3) The UX Balance
+The claim flow is designed to reduce fraud without punishing legitimate workers facing poor connectivity:
+- Soft-flagging: suspicious claims are marked for review, not auto-rejected
+- Grace windows: temporary signal drops in severe weather are retried before escalation
+- Low-friction follow-up: additional checks are requested only when confidence is low
+- Manual review for edge cases: reviewers see model reasons before decisions
+- Recovery path: if later telemetry supports legitimacy, payout can be released automatically
+
+This keeps the process fair for honest workers while still resisting coordinated abuse.
