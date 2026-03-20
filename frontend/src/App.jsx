@@ -24,15 +24,15 @@ import {
 } from 'lucide-react'
 
 const fadeUp = {
-  hidden: { opacity: 0, y: 24 },
-  show: { opacity: 1, y: 0, transition: { type: 'spring', bounce: 0.25, duration: 0.75 } },
+  hidden: { opacity: 0, y: 16 },
+  show: { opacity: 1, y: 0, transition: { type: 'tween', ease: [0.16, 1, 0.3, 1], duration: 0.8 } },
 }
 
 const staggerContainer = {
   hidden: { opacity: 0 },
   show: {
     opacity: 1,
-    transition: { staggerChildren: 0.1, delayChildren: 0.1 },
+    transition: { staggerChildren: 0.08, delayChildren: 0.05 },
   },
 }
 
@@ -212,6 +212,38 @@ function calculateRisk(form) {
     fraudSignals.push('Repeated claim pattern requires manual review.')
   }
 
+  let spoofRiskScore = 0
+  if (form.gpsIntegrity === 'low') spoofRiskScore += 3
+  else if (form.gpsIntegrity === 'medium') spoofRiskScore += 1
+
+  if (form.deviceTrust === 'suspect') spoofRiskScore += 3
+  else if (form.deviceTrust === 'new') spoofRiskScore += 1
+
+  if (parsedHours >= 6 && actualDeliveries === 0 && (form.weather === 'mild' || form.weather === 'moderate')) {
+    spoofRiskScore += 2
+  }
+
+  if (form.previousClaims >= 4) spoofRiskScore += 1
+
+  if (form.gpsIntegrity === 'low') {
+    fraudSignals.push('GPS integrity is low: movement telemetry appears inconsistent.')
+  }
+  if (form.deviceTrust === 'suspect') {
+    fraudSignals.push('Device trust is suspect: session integrity checks failed.')
+  }
+
+  const severeDisruption = form.weather === 'severe' || form.weather === 'extreme'
+  const graceWindowApplied =
+    form.networkReliability === 'drop' &&
+    severeDisruption &&
+    form.gpsIntegrity === 'high' &&
+    form.deviceTrust !== 'suspect'
+
+  if (graceWindowApplied) {
+    spoofRiskScore = Math.max(spoofRiskScore - 2, 0)
+    alerts.push('Network drop detected during severe conditions: grace window is active for this claim.')
+  }
+
   const severityFactor = risk === 'High' ? 1 : risk === 'Medium' ? 0.8 : 0.6
   const performanceFactor = expectedDeliveries ? clamp(actualDeliveries / expectedDeliveries, 0.5, 1) : 0.75
   const modelPayout = Math.round(selectedPlan.payout * severityFactor * (0.85 + performanceFactor * 0.25))
@@ -221,7 +253,18 @@ function calculateRisk(form) {
     (form.weather === 'severe' && risk !== 'Low') ||
     (risk === 'High' && parsedHours >= 8)
 
-  const claimDecision = fraudSignals.length >= 2 ? 'manual-review' : claimEligible ? 'approved' : 'monitoring'
+  const claimDecision = spoofRiskScore >= 4 || fraudSignals.length >= 2
+    ? 'manual-review'
+    : claimEligible
+      ? 'approved'
+      : 'monitoring'
+
+  const spoofRiskLabel = spoofRiskScore >= 5 ? 'High' : spoofRiskScore >= 3 ? 'Medium' : 'Low'
+  const reviewPath = claimDecision === 'manual-review'
+    ? graceWindowApplied
+      ? 'Manual review with worker grace window'
+      : 'Manual review required'
+    : 'Auto flow'
 
   return {
     risk,
@@ -229,11 +272,15 @@ function calculateRisk(form) {
     confidence,
     premium: Math.round(basePremium * selectedPlan.multiplier),
     weekly: selectedPlan.weekly,
-    payout: claimDecision === 'manual-review' ? 0 : modelPayout,
+    payout: claimDecision === 'manual-review' ? (graceWindowApplied ? Math.round(modelPayout * 0.3) : 0) : modelPayout,
     coverage: selectedPlan.coverage,
     alerts,
     fraudSignals,
     claimDecision,
+    spoofRiskScore,
+    spoofRiskLabel,
+    graceWindowApplied,
+    reviewPath,
     disruptionProbability,
     projectedIncomeProtected: Math.round((selectedPlan.payout * disruptionProbability) / 100),
     explanation: `Risk is driven by ${form.worker} profile, ${parsedHours}h shift, ${form.time} schedule, ${form.weather} weather, and a delivery gap of ${deliveryGap}.`,
@@ -268,7 +315,7 @@ function LandingPage({ isDark, onGoAuth }) {
             <Radar className="h-3.5 w-3.5" /> Parametric income protection
           </Motion.p>
 
-          <Motion.h1 variants={fadeUp} className={isDark ? 'text-balance text-6xl md:text-7xl tracking-tighter font-heading font-extrabold leading-[1.1] tracking-tight text-white lg:text-[6rem] xl:text-[7rem]' : 'text-balance text-6xl md:text-7xl tracking-tighter font-heading font-extrabold leading-[1.1] tracking-tight text-zinc-900 lg:text-[6rem] xl:text-[7rem]'}>
+          <Motion.h1 variants={fadeUp} className={isDark ? 'text-balance text-6xl md:text-7xl tracking-tighter font-heading font-extrabold leading-[1.05] tracking-tight text-transparent bg-clip-text bg-gradient-to-br from-white via-zinc-200 to-zinc-500 lg:text-[6rem] xl:text-[7rem]' : 'text-balance text-6xl md:text-7xl tracking-tighter font-heading font-extrabold leading-[1.05] tracking-tight text-transparent bg-clip-text bg-gradient-to-br from-zinc-900 via-zinc-800 to-zinc-500 lg:text-[6rem] xl:text-[7rem]'}>
             Insurance intelligence designed for gig workers.
           </Motion.h1>
 
@@ -339,7 +386,7 @@ function LandingPage({ isDark, onGoAuth }) {
         className="mt-32 border-t border-zinc-200/10 pt-20"
       >
         <div className="text-center mb-16">
-          <h2 className={isDark ? "text-4xl lg:text-5xl font-extrabold font-heading tracking-tight text-white focus:outline-none" : "text-4xl lg:text-5xl font-extrabold font-heading tracking-tight text-zinc-900 focus:outline-none"}>
+          <h2 className={isDark ? "text-4xl lg:text-5xl font-extrabold font-heading tracking-tighter text-transparent bg-clip-text bg-gradient-to-br from-white via-white to-zinc-500 focus:outline-none" : "text-4xl lg:text-5xl font-extrabold font-heading tracking-tighter text-transparent bg-clip-text bg-gradient-to-br from-zinc-900 via-zinc-800 to-zinc-500 focus:outline-none"}>
             Engineered for the modern worker
           </h2>
           <p className={isDark ? "mt-6 text-xl text-zinc-400" : "mt-6 text-xl text-zinc-600"}>Enterprise-grade architecture wrapped in an effortless experience.</p>
@@ -438,6 +485,130 @@ function AuthPage({ isDark, mode, setMode, onBack, onEnterModel }) {
   )
 }
 
+function EventHistoryCard({ claim, isDark, index, statusStyles }) {
+  const [isExpanded, setIsExpanded] = useState(false)
+
+  return (
+    <Motion.article
+      initial={{ opacity: 0, y: 14 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: index * 0.05, ease: [0.16, 1, 0.3, 1], duration: 0.7 }}
+      className={isDark ? 'group relative overflow-hidden rounded-[2rem] border border-white/10 bg-black/40 p-6 backdrop-blur-2xl hover:border-white/20 transition-all duration-500' : 'group relative overflow-hidden rounded-[2rem] border border-zinc-200 bg-white p-6 shadow-sm hover:shadow-md transition-all duration-500'}
+    >
+      <div className="absolute inset-x-0 -top-px h-px w-1/2 bg-gradient-to-r from-transparent via-emerald-400/30 to-transparent opacity-0 mix-blend-overlay transition-opacity duration-500 group-hover:opacity-100" />
+      
+      <div 
+        className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 cursor-pointer"
+        onClick={() => setIsExpanded(!isExpanded)}
+      >
+        <div className="flex-1">
+          <div className="flex items-center gap-3 mb-2">
+            <p className={isDark ? 'text-lg font-bold font-heading text-white tracking-tight' : 'text-lg font-bold font-heading text-zinc-900 tracking-tight'}>{claim.zone}</p>
+            <span className={statusStyles(claim.decision, isDark) + ' rounded-full border px-3 py-1 text-[11px] uppercase tracking-wider font-extrabold font-heading'}>
+              {claim.decision.replace('-', ' ')}
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 mb-3 text-xs">
+            <span className={isDark ? 'flex items-center gap-1 text-zinc-400' : 'flex items-center gap-1 text-zinc-500'}>
+              <MapPin className="h-3 w-3" /> {claim.time}
+            </span>
+            {claim.decision === 'manual-review' && (
+              <span className="flex items-center gap-1 text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 font-medium">
+                <Lock className="h-3 w-3" /> SLA: 4hrs remaining for Investigator
+              </span>
+            )}
+            {claim.details && claim.details.graceWindowApplied && (
+              <span className="flex items-center gap-1 text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20 font-medium">
+                <CloudLightning className="h-3 w-3" /> Grace Window Active (Extreme Weather Exemption)
+              </span>
+            )}
+          </div>
+          {/* Evidence Tags */}
+          {claim.details && (
+            <div className="flex flex-wrap gap-2 mt-2">
+              <span className={isDark ? 'text-[10px] font-mono px-2 py-1 rounded-md bg-white/5 border border-white/10 text-zinc-400' : 'text-[10px] font-mono px-2 py-1 rounded-md bg-zinc-100 border border-zinc-200 text-zinc-600'}>
+                Spoof Score: {(claim.details.spoofRiskScore * 100).toFixed(0)}%
+              </span>
+              <span className={isDark ? 'text-[10px] font-mono px-2 py-1 rounded-md bg-white/5 border border-white/10 text-zinc-400' : 'text-[10px] font-mono px-2 py-1 rounded-md bg-zinc-100 border border-zinc-200 text-zinc-600'}>
+                GPS Config: <span className={claim.details.gpsIntegrity === 'low' ? 'text-red-400' : 'text-green-400'}>{claim.details.gpsIntegrity.toUpperCase()}</span>
+              </span>
+              <span className={isDark ? 'text-[10px] font-mono px-2 py-1 rounded-md bg-white/5 border border-white/10 text-zinc-400' : 'text-[10px] font-mono px-2 py-1 rounded-md bg-zinc-100 border border-zinc-200 text-zinc-600'}>
+                Device Trust: <span className={claim.details.deviceTrust === 'blacklisted' ? 'text-red-400' : 'text-green-400'}>{claim.details.deviceTrust.toUpperCase()}</span>
+              </span>
+            </div>
+          )}
+        </div>
+        
+        <div className="flex items-center gap-6">
+          <div className="flex flex-col items-end gap-1 shrink-0 bg-emerald-500/5 border border-emerald-500/20 rounded-2xl px-6 py-4">
+            <span className={isDark ? 'text-xs font-medium text-emerald-400/70 uppercase tracking-widest' : 'text-xs font-medium text-emerald-600/70 uppercase tracking-widest'}>Disbursed</span>
+            <span className={isDark ? 'text-3xl font-extrabold font-heading text-emerald-400 tracking-tighter' : 'text-3xl font-extrabold font-heading text-emerald-600 tracking-tighter'}>
+              ₹{claim.payout}
+            </span>
+          </div>
+          <button 
+            type="button" 
+            className={isDark ? "flex items-center justify-center p-2 rounded-full border border-white/10 bg-white/5 text-zinc-400 hover:text-white hover:bg-white/10 transition-colors" : "flex items-center justify-center p-2 rounded-full border border-zinc-200 bg-zinc-50 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 transition-colors"}
+          >
+            <ChevronRight className={`h-5 w-5 transition-transform duration-300 ${isExpanded ? 'rotate-90' : ''}`} />
+          </button>
+        </div>
+      </div>
+
+      <AnimatePresence>
+        {isExpanded && (
+          <Motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden"
+          >
+            <div className={isDark ? 'mt-6 border-t border-white/10 pt-6' : 'mt-6 border-t border-zinc-200 pt-6'}>
+              <div className="grid md:grid-cols-2 gap-8">
+                <div>
+                  <h4 className={isDark ? 'text-xs font-bold font-heading uppercase tracking-wider text-zinc-300 mb-3' : 'text-xs font-bold font-heading uppercase tracking-wider text-zinc-700 mb-3'}>Telemetry & Environment</h4>
+                  <div className="space-y-2">
+                    <div className={isDark ? 'flex justify-between text-sm text-zinc-400' : 'flex justify-between text-sm text-zinc-600'}>
+                      <span>Weather Signal:</span>
+                      <span className="font-semibold text-zinc-200 dark:text-zinc-200">{claim.details?.weather || 'N/A'}</span>
+                    </div>
+                    <div className={isDark ? 'flex justify-between text-sm text-zinc-400' : 'flex justify-between text-sm text-zinc-600'}>
+                      <span>Time Context:</span>
+                      <span className="font-semibold text-zinc-200 dark:text-zinc-200">{claim.details?.time || 'N/A'}</span>
+                    </div>
+                    <div className={isDark ? 'flex justify-between text-sm text-zinc-400' : 'flex justify-between text-sm text-zinc-600'}>
+                      <span>Plan Tier:</span>
+                      <span className="font-semibold text-zinc-200 dark:text-zinc-200">{claim.details?.plan || 'N/A'}</span>
+                    </div>
+                  </div>
+                </div>
+                
+                <div>
+                  <h4 className={isDark ? 'text-xs font-bold font-heading uppercase tracking-wider text-zinc-300 mb-3' : 'text-xs font-bold font-heading uppercase tracking-wider text-zinc-700 mb-3'}>Fraud Engine Execution</h4>
+                  <div className="space-y-2">
+                    <div className={isDark ? 'flex justify-between text-sm text-zinc-400' : 'flex justify-between text-sm text-zinc-600'}>
+                      <span>Spoof Score Limit:</span>
+                      <span className="font-semibold text-emerald-400">&lt; 30%</span>
+                    </div>
+                    <div className={isDark ? 'flex justify-between text-sm text-zinc-400' : 'flex justify-between text-sm text-zinc-600'}>
+                      <span>Network Analysis:</span>
+                      <span className={claim.details?.networkReliability === 'good' ? 'font-semibold text-emerald-400' : 'font-semibold text-amber-400'}>{claim.details?.networkReliability || 'N/A'}</span>
+                    </div>
+                    <div className={isDark ? 'flex justify-between text-sm text-zinc-400' : 'flex justify-between text-sm text-zinc-600'}>
+                      <span>Device Fingerprint:</span>
+                      <span className={claim.details?.deviceTrust === 'trusted' ? 'font-semibold text-emerald-400' : 'font-semibold text-red-400'}>{claim.details?.deviceTrust || 'N/A'}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </Motion.div>
+        )}
+      </AnimatePresence>
+    </Motion.article>
+  )
+}
+
 function DashboardPage({
   isDark,
   form,
@@ -478,7 +649,7 @@ function DashboardPage({
 
           <Motion.aside variants={fadeUp} className={isDark ? 'rounded-[2.5rem] border border-green-200/20 bg-gradient-to-b from-green-200/10 to-zinc-900/55 p-10' : 'rounded-[2.5rem] border border-green-200 bg-gradient-to-b from-green-50 to-white p-10'}>
             <div className="flex items-center justify-between">
-              <h3 className={isDark ? 'text-3xl lg:text-4xl font-extrabold font-heading tracking-tight text-white' : 'text-3xl lg:text-4xl font-extrabold font-heading tracking-tight text-zinc-900'}>Decision output</h3>
+              <h3 className={isDark ? 'text-3xl lg:text-4xl font-extrabold font-heading tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-emerald-200' : 'text-3xl lg:text-4xl font-extrabold font-heading tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-emerald-600 to-emerald-400'}>Decision output</h3>
               <span className={statusStyles(result.claimDecision, isDark) + ' rounded-full border px-3 py-1 text-xs font-bold font-heading'}>
                 {result.claimDecision.replace('-', ' ')}
               </span>
@@ -500,6 +671,18 @@ function DashboardPage({
               <div className={isDark ? 'rounded-[2rem] bg-white/[0.02] backdrop-blur-3xl shadow-[0_8px_32px_rgba(0,0,0,0.8)] border border-white/[0.05] p-8' : 'rounded-[2rem] border border-zinc-200 bg-white p-8'}>
                 <p className={isDark ? 'text-xs text-zinc-400' : 'text-xs text-zinc-500'}>Recommended payout</p>
                 <p className={isDark ? 'mt-2 text-4xl lg:text-5xl font-black font-mono tracking-tighter text-green-300' : 'mt-2 text-4xl lg:text-5xl font-black font-mono tracking-tighter text-green-600'}><AnimatedNumber value={result.payout} prefix="Rs " /></p>
+              </div>
+              <div className={isDark ? 'rounded-[2rem] bg-white/[0.02] backdrop-blur-3xl shadow-[0_8px_32px_rgba(0,0,0,0.8)] border border-white/[0.05] p-8' : 'rounded-[2rem] border border-zinc-200 bg-white p-8'}>
+                <p className={isDark ? 'text-xs text-zinc-400' : 'text-xs text-zinc-500'}>Spoof risk</p>
+                <p className={isDark ? 'mt-2 text-3xl font-black font-mono tracking-tighter text-amber-200' : 'mt-2 text-3xl font-black font-mono tracking-tighter text-amber-700'}>{result.spoofRiskLabel}</p>
+                <p className={isDark ? 'mt-1 text-xs text-zinc-500' : 'mt-1 text-xs text-zinc-500'}>Score: {result.spoofRiskScore}/8</p>
+              </div>
+              <div className={isDark ? 'rounded-[2rem] bg-white/[0.02] backdrop-blur-3xl shadow-[0_8px_32px_rgba(0,0,0,0.8)] border border-white/[0.05] p-8' : 'rounded-[2rem] border border-zinc-200 bg-white p-8'}>
+                <p className={isDark ? 'text-xs text-zinc-400' : 'text-xs text-zinc-500'}>Review path</p>
+                <p className={isDark ? 'mt-2 text-lg font-bold text-zinc-100' : 'mt-2 text-lg font-bold text-zinc-900'}>{result.reviewPath}</p>
+                {result.graceWindowApplied ? (
+                  <p className={isDark ? 'mt-2 text-xs text-green-300' : 'mt-2 text-xs text-green-700'}>Grace window active: provisional support enabled during severe-weather network drop.</p>
+                ) : null}
               </div>
             </div>
 
@@ -575,6 +758,100 @@ function DashboardPage({
         </div>
       </section>
 
+      <section id="adversarial-console" className="relative py-20">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className={isDark ? 'rounded-[2.5rem] border border-white/10 bg-white/[0.03] p-8 backdrop-blur-3xl' : 'rounded-[2.5rem] border border-zinc-200 bg-white p-8 shadow-sm'}>
+            <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className={isDark ? 'text-xs font-bold font-heading uppercase tracking-[0.2em] text-green-300' : 'text-xs font-bold font-heading uppercase tracking-[0.2em] text-green-700'}>Crisis mode response</p>
+                <h3 className={isDark ? 'mt-2 text-3xl font-extrabold font-heading text-white' : 'mt-2 text-3xl font-extrabold font-heading text-zinc-900'}>Adversarial Defense Console</h3>
+                <p className={isDark ? 'mt-2 text-sm text-zinc-300' : 'mt-2 text-sm text-zinc-700'}>Visible controls and decision paths for spoofing defense, fraud-ring detection, and fair handling of genuine network drops.</p>
+              </div>
+              <span className={isDark ? 'rounded-full border border-green-300/30 bg-green-500/20 px-4 py-2 text-xs font-bold font-heading text-green-100' : 'rounded-full border border-green-300 bg-green-100 px-4 py-2 text-xs font-bold font-heading text-green-800'}>
+                Active decision path: {result.reviewPath}
+              </span>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-3">
+              <article className={isDark ? 'rounded-[1.5rem] border border-white/10 bg-black/40 p-6' : 'rounded-[1.5rem] border border-zinc-200 bg-zinc-50 p-6'}>
+                <p className={isDark ? 'text-xs font-bold font-heading uppercase tracking-wider text-green-300' : 'text-xs font-bold font-heading uppercase tracking-wider text-green-700'}>1. Differentiation Logic</p>
+                <p className={isDark ? 'mt-3 text-sm text-zinc-300' : 'mt-3 text-sm text-zinc-700'}>
+                  Claims are separated using disruption truth, work continuity, and trust integrity, not just region weather + GPS.
+                </p>
+                <p className={isDark ? 'mt-3 text-xs text-zinc-400' : 'mt-3 text-xs text-zinc-600'}>
+                  Live values: spoof risk {result.spoofRiskLabel} ({result.spoofRiskScore}/8), weather {form.weather}, network {form.networkReliability}.
+                </p>
+              </article>
+
+              <article className={isDark ? 'rounded-[1.5rem] border border-white/10 bg-black/40 p-6' : 'rounded-[1.5rem] border border-zinc-200 bg-zinc-50 p-6'}>
+                <p className={isDark ? 'text-xs font-bold font-heading uppercase tracking-wider text-green-300' : 'text-xs font-bold font-heading uppercase tracking-wider text-green-700'}>2. Data Beyond GPS</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {[
+                    'Trajectory quality',
+                    'Sensor consistency',
+                    'Device trust',
+                    'Network anomalies',
+                    'Route collisions',
+                    'Synchronized claim timing',
+                  ].map((chip) => (
+                    <span key={chip} className={isDark ? 'rounded-full border border-white/15 bg-white/[0.03] px-3 py-1 text-xs text-zinc-200' : 'rounded-full border border-zinc-300 bg-white px-3 py-1 text-xs text-zinc-700'}>{chip}</span>
+                  ))}
+                </div>
+              </article>
+
+              <article className={isDark ? 'rounded-[1.5rem] border border-white/10 bg-black/40 p-6' : 'rounded-[1.5rem] border border-zinc-200 bg-zinc-50 p-6'}>
+                <p className={isDark ? 'text-xs font-bold font-heading uppercase tracking-wider text-green-300' : 'text-xs font-bold font-heading uppercase tracking-wider text-green-700'}>3. UX Fairness Balance</p>
+                <p className={isDark ? 'mt-3 text-sm text-zinc-300' : 'mt-3 text-sm text-zinc-700'}>
+                  Flagged claims are not auto-rejected. When severe weather and network drop are genuine, a grace window protects honest workers.
+                </p>
+                {result.graceWindowApplied ? (
+                  <p className={isDark ? 'mt-3 text-xs text-green-300' : 'mt-3 text-xs text-green-700'}>Grace window is active for this scenario.</p>
+                ) : (
+                  <p className={isDark ? 'mt-3 text-xs text-zinc-400' : 'mt-3 text-xs text-zinc-600'}>Grace window can trigger when network drops during severe or extreme weather.</p>
+                )}
+              </article>
+            </div>
+
+            <div className="mt-6 grid gap-4 lg:grid-cols-[1.1fr_1fr]">
+              <div className={isDark ? 'rounded-[1.5rem] border border-amber-300/20 bg-amber-200/10 p-6' : 'rounded-[1.5rem] border border-amber-200 bg-amber-50 p-6'}>
+                <p className={isDark ? 'text-xs font-bold font-heading uppercase tracking-wider text-amber-200' : 'text-xs font-bold font-heading uppercase tracking-wider text-amber-800'}>Flagged Claim Handling Path</p>
+                <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
+                  <span className={isDark ? 'rounded-full border border-green-300/40 bg-green-500/20 px-3 py-1 text-green-100' : 'rounded-full border border-green-300 bg-green-100 px-3 py-1 text-green-800'}>Auto-approve</span>
+                  <span className={isDark ? 'text-zinc-500' : 'text-zinc-500'}>-></span>
+                  <span className={isDark ? 'rounded-full border border-cyan-300/40 bg-cyan-500/20 px-3 py-1 text-cyan-100' : 'rounded-full border border-cyan-300 bg-cyan-100 px-3 py-1 text-cyan-800'}>Grace Window</span>
+                  <span className={isDark ? 'text-zinc-500' : 'text-zinc-500'}>-></span>
+                  <span className={isDark ? 'rounded-full border border-amber-300/40 bg-amber-500/20 px-3 py-1 text-amber-100' : 'rounded-full border border-amber-300 bg-amber-100 px-3 py-1 text-amber-800'}>Manual Review</span>
+                </div>
+                <p className={isDark ? 'mt-4 text-sm text-amber-100/90' : 'mt-4 text-sm text-amber-900'}>
+                  Current route for this claim: <strong>{result.reviewPath}</strong>
+                </p>
+              </div>
+
+              <div className={isDark ? 'rounded-[1.5rem] border border-white/10 bg-black/40 p-6' : 'rounded-[1.5rem] border border-zinc-200 bg-zinc-50 p-6'}>
+                <p className={isDark ? 'text-xs font-bold font-heading uppercase tracking-wider text-zinc-300' : 'text-xs font-bold font-heading uppercase tracking-wider text-zinc-700'}>Operational Readiness Matrix</p>
+                <p className={isDark ? 'mt-3 text-sm text-zinc-300' : 'mt-3 text-sm text-zinc-700'}>
+                  Live control posture for spoof-resilient adjudication under adverse weather and unstable networks.
+                </p>
+                <div className="mt-4 grid gap-2 text-xs sm:grid-cols-2">
+                  <span className={isDark ? 'rounded-full border border-white/15 bg-white/[0.03] px-3 py-1.5 text-zinc-200' : 'rounded-full border border-zinc-300 bg-white px-3 py-1.5 text-zinc-700'}>
+                    Path Integrity: {result.reviewPath}
+                  </span>
+                  <span className={isDark ? 'rounded-full border border-white/15 bg-white/[0.03] px-3 py-1.5 text-zinc-200' : 'rounded-full border border-zinc-300 bg-white px-3 py-1.5 text-zinc-700'}>
+                    Spoof Pressure: {result.spoofRiskLabel}
+                  </span>
+                  <span className={isDark ? 'rounded-full border border-white/15 bg-white/[0.03] px-3 py-1.5 text-zinc-200' : 'rounded-full border border-zinc-300 bg-white px-3 py-1.5 text-zinc-700'}>
+                    Telemetry Trust: {String(form.gpsIntegrity).toUpperCase()}
+                  </span>
+                  <span className={isDark ? 'rounded-full border border-white/15 bg-white/[0.03] px-3 py-1.5 text-zinc-200' : 'rounded-full border border-zinc-300 bg-white px-3 py-1.5 text-zinc-700'}>
+                    Network State: {String(form.networkReliability).toUpperCase()}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section id="workspace" className="relative py-20">
         <div className="mx-auto grid max-w-7xl gap-8 px-4 sm:px-6 lg:grid-cols-[1fr_1fr] lg:px-8">
           <Motion.div
@@ -583,7 +860,7 @@ function DashboardPage({
             viewport={{ once: true }}
             className={isDark ? 'rounded-[2.5rem] border border-white/5 bg-white/[0.03] backdrop-blur-2xl p-10 backdrop-blur-xl' : 'rounded-[2.5rem] border border-zinc-200 bg-white p-10'}
           >
-            <h3 className={isDark ? 'text-3xl lg:text-4xl font-extrabold font-heading tracking-tight text-white' : 'text-3xl lg:text-4xl font-extrabold font-heading tracking-tight text-zinc-900'}>Risk inputs</h3>
+            <h3 className={isDark ? 'text-3xl lg:text-4xl font-extrabold font-heading tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-white to-zinc-400' : 'text-3xl lg:text-4xl font-extrabold font-heading tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-zinc-900 to-zinc-600'}>Risk inputs</h3>
             <p className={isDark ? 'mt-2 text-sm text-zinc-300' : 'mt-2 text-sm text-zinc-600'}>
               Configure worker profile and operational signals.
             </p>
@@ -698,62 +975,118 @@ function DashboardPage({
               </div>
 
               <div className={isDark ? 'rounded-[2rem] border border-white/10 bg-white/[0.02] p-6 backdrop-blur-2xl' : 'rounded-[2rem] border border-zinc-200 bg-zinc-50 p-6'}>
+                <p className={isDark ? 'text-sm font-bold font-heading uppercase tracking-wider text-green-300' : 'text-sm font-bold font-heading uppercase tracking-wider text-green-700'}>Adversarial signal checks</p>
+                <p className={isDark ? 'mt-1 text-xs text-zinc-400' : 'mt-1 text-xs text-zinc-600'}>These inputs simulate anti-spoofing telemetry used to separate genuine distress from coordinated fraud.</p>
+
+                <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+                  <label className="block">
+                    <span className={isDark ? 'mb-2 block text-sm text-zinc-200' : 'mb-2 block text-sm text-zinc-700'}>GPS Integrity</span>
+                    <select
+                      value={form.gpsIntegrity}
+                      onChange={(e) => setForm((prev) => ({ ...prev, gpsIntegrity: e.target.value }))}
+                      className={isDark ? 'w-full rounded-[1.25rem] border border-white/10 bg-black/50 px-4 py-3 text-sm text-zinc-100 outline-none ring-green-200/30 focus:ring' : 'w-full rounded-[1.25rem] border border-zinc-300 bg-white px-4 py-3 text-sm text-zinc-900 outline-none ring-green-500/30 focus:ring'}
+                    >
+                      <option value="high">High (stable)</option>
+                      <option value="medium">Medium (minor drift)</option>
+                      <option value="low">Low (inconsistent)</option>
+                    </select>
+                  </label>
+
+                  <label className="block">
+                    <span className={isDark ? 'mb-2 block text-sm text-zinc-200' : 'mb-2 block text-sm text-zinc-700'}>Device Trust</span>
+                    <select
+                      value={form.deviceTrust}
+                      onChange={(e) => setForm((prev) => ({ ...prev, deviceTrust: e.target.value }))}
+                      className={isDark ? 'w-full rounded-[1.25rem] border border-white/10 bg-black/50 px-4 py-3 text-sm text-zinc-100 outline-none ring-green-200/30 focus:ring' : 'w-full rounded-[1.25rem] border border-zinc-300 bg-white px-4 py-3 text-sm text-zinc-900 outline-none ring-green-500/30 focus:ring'}
+                    >
+                      <option value="trusted">Trusted</option>
+                      <option value="new">New device/session</option>
+                      <option value="suspect">Suspect</option>
+                    </select>
+                  </label>
+
+                  <label className="block">
+                    <span className={isDark ? 'mb-2 block text-sm text-zinc-200' : 'mb-2 block text-sm text-zinc-700'}>Network Reliability</span>
+                    <select
+                      value={form.networkReliability}
+                      onChange={(e) => setForm((prev) => ({ ...prev, networkReliability: e.target.value }))}
+                      className={isDark ? 'w-full rounded-[1.25rem] border border-white/10 bg-black/50 px-4 py-3 text-sm text-zinc-100 outline-none ring-green-200/30 focus:ring' : 'w-full rounded-[1.25rem] border border-zinc-300 bg-white px-4 py-3 text-sm text-zinc-900 outline-none ring-green-500/30 focus:ring'}
+                    >
+                      <option value="good">Good</option>
+                      <option value="unstable">Unstable</option>
+                      <option value="drop">Drop / intermittent</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+
+              <div className={isDark ? 'rounded-[2rem] border border-white/10 bg-white/[0.02] p-6 backdrop-blur-2xl' : 'rounded-[2rem] border border-zinc-200 bg-zinc-50 p-6'}>
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div>
                     <p className={isDark ? 'text-sm font-bold font-heading uppercase tracking-wider text-green-300' : 'text-sm font-bold font-heading uppercase tracking-wider text-green-700'}>Region intelligence</p>
                     <p className={isDark ? 'mt-1 text-xs text-zinc-400' : 'mt-1 text-xs text-zinc-600'}>Select a state and district, then fetch live weather to classify disruption severity.</p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setIsMapPickerOpen(true)}
-                      className={isDark ? 'rounded-full border border-white/20 bg-white/[0.04] px-4 py-2 text-xs font-bold font-heading text-zinc-100 transition hover:border-green-300/40 hover:text-green-100' : 'rounded-full border border-zinc-300 bg-white px-4 py-2 text-xs font-bold font-heading text-zinc-800 transition hover:border-green-300 hover:text-green-700'}
-                    >
-                      Pick on map
-                    </button>
+                  <div className="flex items-center gap-3">
                     <button
                       type="button"
                       onClick={fetchRegionWeather}
                       disabled={regionLoading}
-                      className={isDark ? 'rounded-full border border-green-300/30 bg-green-500/20 px-4 py-2 text-xs font-bold font-heading text-green-100 transition hover:bg-green-500/30 disabled:cursor-not-allowed disabled:opacity-60' : 'rounded-full border border-green-300 bg-green-100 px-4 py-2 text-xs font-bold font-heading text-green-800 transition hover:bg-green-200 disabled:cursor-not-allowed disabled:opacity-60'}
+                      className={isDark ? 'group relative flex items-center justify-center gap-2 overflow-hidden rounded-full border border-zinc-700 bg-white px-6 py-2.5 text-xs font-bold text-black transition-all hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-60' : 'group relative flex items-center justify-center gap-2 overflow-hidden rounded-full border border-zinc-300 bg-zinc-900 px-6 py-2.5 text-xs font-bold text-white transition-all hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60'}
                     >
-                      {regionLoading ? 'Fetching weather...' : 'Select region'}
+                      {regionLoading ? 'Fetching...' : 'Confirm Region'}
                     </button>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  <label className="block">
-                    <span className={isDark ? 'mb-2 block text-sm text-zinc-200' : 'mb-2 block text-sm text-zinc-700'}>State</span>
+                  <label className="block relative group">
+                    <span className={isDark ? 'mb-2 block text-sm font-semibold text-zinc-300' : 'mb-2 block text-sm font-semibold text-zinc-700'}>State Territory</span>
                     <select
                       value={selectedState}
                       onChange={(e) => setSelectedState(e.target.value)}
-                      className={isDark ? 'w-full rounded-[1.25rem] border border-white/10 bg-black/50 px-4 py-3 text-sm text-zinc-100 outline-none ring-green-200/30 focus:ring' : 'w-full rounded-[1.25rem] border border-zinc-300 bg-white px-4 py-3 text-sm text-zinc-900 outline-none ring-green-500/30 focus:ring'}
+                      className={isDark ? 'w-full appearance-none rounded-[1.25rem] border border-white/10 bg-black/50 px-5 py-4 text-sm font-medium text-zinc-100 shadow-inner outline-none ring-1 ring-transparent transition-all hover:border-emerald-500/30 focus:border-emerald-500/50 focus:bg-black/80 focus:ring-emerald-500/20' : 'w-full appearance-none rounded-[1.25rem] border border-zinc-300 bg-white px-5 py-4 text-sm font-medium text-zinc-900 shadow-inner outline-none ring-1 ring-transparent transition-all hover:border-emerald-500/30 focus:border-emerald-500/50 focus:bg-zinc-50 focus:ring-emerald-500/20'}
                     >
                       {regions.map((region) => (
-                        <option key={region.state} value={region.state}>{region.state}</option>
+                        <option key={region.state} value={region.state} className="py-2">{region.state}</option>
                       ))}
                     </select>
+                    <div className="pointer-events-none absolute right-4 top-[2.4rem] text-emerald-500/70 group-hover:text-emerald-500 transition-colors">
+                      <ChevronRight className="h-5 w-5 rotate-90" />
+                    </div>
                   </label>
 
-                  <label className="block">
-                    <span className={isDark ? 'mb-2 block text-sm text-zinc-200' : 'mb-2 block text-sm text-zinc-700'}>District</span>
+                  <label className="block relative group">
+                    <span className={isDark ? 'mb-2 block text-sm font-semibold text-zinc-300' : 'mb-2 block text-sm font-semibold text-zinc-700'}>Metropolitan District</span>
                     <select
                       value={selectedDistrict}
                       onChange={(e) => setSelectedDistrict(e.target.value)}
-                      className={isDark ? 'w-full rounded-[1.25rem] border border-white/10 bg-black/50 px-4 py-3 text-sm text-zinc-100 outline-none ring-green-200/30 focus:ring' : 'w-full rounded-[1.25rem] border border-zinc-300 bg-white px-4 py-3 text-sm text-zinc-900 outline-none ring-green-500/30 focus:ring'}
+                      className={isDark ? 'w-full appearance-none rounded-[1.25rem] border border-white/10 bg-black/50 px-5 py-4 text-sm font-medium text-zinc-100 shadow-inner outline-none ring-1 ring-transparent transition-all hover:border-emerald-500/30 focus:border-emerald-500/50 focus:bg-black/80 focus:ring-emerald-500/20' : 'w-full appearance-none rounded-[1.25rem] border border-zinc-300 bg-white px-5 py-4 text-sm font-medium text-zinc-900 shadow-inner outline-none ring-1 ring-transparent transition-all hover:border-emerald-500/30 focus:border-emerald-500/50 focus:bg-zinc-50 focus:ring-emerald-500/20'}
                     >
                       {selectedStateDistricts.map((district) => (
-                        <option key={district} value={district}>{district}</option>
+                        <option key={district} value={district} className="py-2">{district}</option>
                       ))}
                     </select>
+                    <div className="pointer-events-none absolute right-4 top-[2.4rem] text-emerald-500/70 group-hover:text-emerald-500 transition-colors">
+                      <ChevronRight className="h-5 w-5 rotate-90" />
+                    </div>
                   </label>
                 </div>
 
                 <div className={isDark ? 'mt-4 rounded-[1.5rem] border border-white/10 bg-black/30 p-4 backdrop-blur-xl' : 'mt-4 rounded-[1.5rem] border border-zinc-200 bg-white p-4'}>
                   <p className={isDark ? 'text-xs font-bold font-heading uppercase tracking-wider text-zinc-300' : 'text-xs font-bold font-heading uppercase tracking-wider text-zinc-600'}>Interactive India map</p>
-                  <div className={isDark ? 'mt-3 rounded-[1.25rem] border border-white/10 bg-black/60 p-3 shadow-[0_20px_50px_rgba(0,0,0,0.45)]' : 'mt-3 rounded-[1.25rem] border border-zinc-200 bg-zinc-50 p-3 shadow-[0_20px_50px_rgba(0,0,0,0.08)]'}>
-                    <svg viewBox={indiaMap.viewBox} className="h-72 w-full">
+                  <div className={isDark ? 'mt-3 relative overflow-hidden rounded-[1.25rem] border border-white/10 bg-black/60 p-5 shadow-[0_20px_50px_rgba(0,0,0,0.45)]' : 'mt-3 relative overflow-hidden rounded-[1.25rem] border border-zinc-200 bg-zinc-50 p-5 shadow-[0_20px_50px_rgba(0,0,0,0.08)]'}>
+                    <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 to-transparent pointer-events-none" />
+                    <svg viewBox={indiaMap.viewBox} className="h-72 w-full drop-shadow-md">
+                      <defs>
+                        <linearGradient id="activeMapDark" x1="0" y1="0" x2="1" y2="1">
+                          <stop offset="0%" stopColor="#10b981" />
+                          <stop offset="100%" stopColor="#047857" />
+                        </linearGradient>
+                        <linearGradient id="activeMapLight" x1="0" y1="0" x2="1" y2="1">
+                          <stop offset="0%" stopColor="#34d399" />
+                          <stop offset="100%" stopColor="#059669" />
+                        </linearGradient>
+                      </defs>
                       {indiaMap.locations.map((location) => {
                         const code = location.id.toUpperCase()
                         const active = code === selectedStateCode
@@ -771,18 +1104,19 @@ function DashboardPage({
                                 setSelectedStateByCode(code)
                               }
                             }}
-                            className="transition-colors duration-200"
-                            fill={active ? (isDark ? '#22c55e' : '#16a34a') : isDark ? '#1f2937' : '#e5e7eb'}
-                            stroke={isDark ? '#3f3f46' : '#d4d4d8'}
-                            strokeWidth={active ? 1.3 : 0.8}
+                            className="transition-all duration-300 ease-in-out cursor-pointer hover:brightness-125 focus:outline-none"
+                            fill={active ? (isDark ? 'url(#activeMapDark)' : 'url(#activeMapLight)') : isDark ? '#27272a' : '#f4f4f5'}
+                            stroke={active ? (isDark ? '#34d399' : '#10b981') : isDark ? '#3f3f46' : '#d4d4d8'}
+                            strokeWidth={active ? 1.5 : 0.8}
+                            style={{ filter: active ? `drop-shadow(0 0 6px ${isDark ? 'rgba(52,211,153,0.4)' : 'rgba(16,185,129,0.4)'})` : 'none' }}
                           >
                             <title>{location.name}</title>
                           </path>
                         )
                       })}
                     </svg>
-                    <p className={isDark ? 'mt-2 text-xs text-zinc-400' : 'mt-2 text-xs text-zinc-600'}>
-                      Hover or click a state/UT to switch context. Current selection: {selectedState}
+                    <p className={isDark ? 'mt-2 text-center text-xs text-zinc-400 font-medium' : 'mt-2 text-center text-xs text-zinc-600 font-medium'}>
+                      Hover or click a state/UT to switch context. <span className="text-emerald-500 font-bold block mt-1">{selectedState}</span>
                     </p>
                   </div>
 
@@ -854,36 +1188,50 @@ function DashboardPage({
                 {isMapPickerOpen ? (
                   <Motion.div
                     initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="fixed inset-0 z-[70] grid place-items-center bg-black/70 px-4"
+                    animate={{ opacity: 1, backdropFilter: 'blur(12px)' }}
+                    exit={{ opacity: 0, backdropFilter: 'blur(0px)' }}
+                    transition={{ duration: 0.3 }}
+                    className="fixed inset-0 z-[70] grid place-items-center bg-black/60 px-4"
                     onClick={() => setIsMapPickerOpen(false)}
                   >
                     <Motion.div
-                      initial={{ opacity: 0, y: 20, scale: 0.98 }}
+                      initial={{ opacity: 0, y: 30, scale: 0.95 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: 20, scale: 0.98 }}
-                      transition={{ duration: 0.22 }}
-                      className={isDark ? 'w-full max-w-4xl rounded-[2rem] border border-white/10 bg-zinc-950/95 p-6 backdrop-blur-3xl' : 'w-full max-w-4xl rounded-[2rem] border border-zinc-200 bg-white/95 p-6 backdrop-blur-3xl'}
+                      exit={{ opacity: 0, y: 20, scale: 0.95 }}
+                      transition={{ type: "spring", damping: 25, stiffness: 300 }}
+                      className={isDark ? 'relative w-full max-w-5xl rounded-[2.5rem] border border-white/10 bg-[#0a0a0a] p-6 shadow-[0_0_80px_rgba(16,185,129,0.15)] ring-1 ring-white/5' : 'relative w-full max-w-5xl rounded-[2.5rem] border border-zinc-200 bg-white p-6 shadow-[0_0_80px_rgba(0,0,0,0.1)] ring-1 ring-zinc-900/5'}
                       onClick={(event) => event.stopPropagation()}
                     >
-                      <div className="mb-4 flex items-center justify-between gap-3">
+                      <div className="absolute top-0 inset-x-0 h-px w-full bg-gradient-to-r from-transparent via-emerald-500/50 to-transparent" />
+                      
+                      <div className="mb-6 flex items-start justify-between gap-3">
                         <div>
-                          <p className={isDark ? 'text-lg font-bold font-heading text-white' : 'text-lg font-bold font-heading text-zinc-900'}>Select Region on India Map</p>
-                          <p className={isDark ? 'text-xs text-zinc-400' : 'text-xs text-zinc-600'}>Click a state/UT, then choose a district and fetch weather.</p>
+                          <p className={isDark ? 'text-2xl font-extrabold font-heading tracking-tight text-white' : 'text-2xl font-extrabold font-heading tracking-tight text-zinc-900'}>Select Region on India Map</p>
+                          <p className={isDark ? 'mt-1 text-sm text-zinc-400' : 'mt-1 text-sm text-zinc-500'}>Click a state/UT, then choose a district and fetch weather.</p>
                         </div>
                         <button
                           type="button"
                           onClick={() => setIsMapPickerOpen(false)}
-                          className={isDark ? 'rounded-full border border-white/20 px-3 py-1.5 text-xs text-zinc-200 hover:border-green-300/40 hover:text-green-200' : 'rounded-full border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 hover:border-green-300 hover:text-green-700'}
+                          className={isDark ? 'group rounded-full p-2.5 border border-white/10 bg-white/5 text-zinc-400 hover:bg-white/10 hover:text-white transition' : 'group rounded-full p-2.5 border border-zinc-200 bg-zinc-50 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 transition'}
                         >
-                          Close
+                          <X className="h-5 w-5 transition-transform group-hover:rotate-90" />
                         </button>
                       </div>
 
                       <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
-                        <div className={isDark ? 'rounded-[1.5rem] border border-white/10 bg-black/60 p-3' : 'rounded-[1.5rem] border border-zinc-200 bg-zinc-50 p-3'}>
-                          <svg viewBox={indiaMap.viewBox} className="h-[420px] w-full">
+                        <div className={isDark ? 'relative overflow-hidden rounded-[1.5rem] border border-white/10 bg-black/60 p-5 shadow-inner' : 'relative overflow-hidden rounded-[1.5rem] border border-zinc-200 bg-zinc-50 p-5 shadow-inner'}>
+                          <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 to-transparent pointer-events-none" />
+                          <svg viewBox={indiaMap.viewBox} className="h-[420px] w-full drop-shadow-lg">
+                            <defs>
+                              <linearGradient id="activeMapModalDark" x1="0" y1="0" x2="1" y2="1">
+                                <stop offset="0%" stopColor="#10b981" />
+                                <stop offset="100%" stopColor="#047857" />
+                              </linearGradient>
+                              <linearGradient id="activeMapModalLight" x1="0" y1="0" x2="1" y2="1">
+                                <stop offset="0%" stopColor="#34d399" />
+                                <stop offset="100%" stopColor="#059669" />
+                              </linearGradient>
+                            </defs>
                             {indiaMap.locations.map((location) => {
                               const code = location.id.toUpperCase()
                               const active = code === selectedStateCode
@@ -894,16 +1242,18 @@ function DashboardPage({
                                   role="button"
                                   tabIndex={0}
                                   onClick={() => setSelectedStateByCode(code)}
+                                  onMouseEnter={() => setSelectedStateByCode(code)}
                                   onKeyDown={(event) => {
                                     if (event.key === 'Enter' || event.key === ' ') {
                                       event.preventDefault()
                                       setSelectedStateByCode(code)
                                     }
                                   }}
-                                  className="cursor-pointer transition-colors duration-200"
-                                  fill={active ? (isDark ? '#22c55e' : '#16a34a') : isDark ? '#18181b' : '#e4e4e7'}
-                                  stroke={isDark ? '#52525b' : '#d4d4d8'}
-                                  strokeWidth={active ? 1.4 : 0.9}
+                                  className="transition-all duration-300 ease-in-out cursor-pointer hover:brightness-125 focus:outline-none"
+                                  fill={active ? (isDark ? 'url(#activeMapModalDark)' : 'url(#activeMapModalLight)') : isDark ? '#27272a' : '#f4f4f5'}
+                                  stroke={active ? (isDark ? '#34d399' : '#10b981') : isDark ? '#3f3f46' : '#d4d4d8'}
+                                  strokeWidth={active ? 1.5 : 0.8}
+                                  style={{ filter: active ? `drop-shadow(0 0 6px ${isDark ? 'rgba(52,211,153,0.4)' : 'rgba(16,185,129,0.4)'})` : 'none' }}
                                 >
                                   <title>{location.name}</title>
                                 </path>
@@ -912,11 +1262,20 @@ function DashboardPage({
                           </svg>
                         </div>
 
-                        <div className={isDark ? 'rounded-[1.5rem] border border-white/10 bg-white/[0.03] p-4' : 'rounded-[1.5rem] border border-zinc-200 bg-white p-4'}>
-                          <p className={isDark ? 'text-sm font-semibold text-zinc-100' : 'text-sm font-semibold text-zinc-900'}>{selectedState}</p>
-                          <p className={isDark ? 'mt-1 text-xs text-zinc-400' : 'mt-1 text-xs text-zinc-600'}>Code: {selectedStateCode}</p>
+                        <div className={isDark ? 'flex flex-col overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.02] shadow-inner' : 'flex flex-col overflow-hidden rounded-[2rem] border border-zinc-200 bg-zinc-50 shadow-inner'}>
+                          <div className={isDark ? 'border-b border-white/10 p-5 bg-white/[0.02]' : 'border-b border-zinc-200 p-5 bg-zinc-100/50'}>
+                            <p className={isDark ? 'text-lg font-bold text-zinc-100 tracking-tight' : 'text-lg font-bold text-zinc-900 tracking-tight'}>{selectedState}</p>
+                            <div className="mt-2 flex items-center gap-2">
+                              <span className={isDark ? 'rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-mono font-medium text-emerald-400' : 'rounded-md border border-zinc-200 bg-white px-2 py-0.5 text-[10px] font-mono font-medium text-emerald-600'}>
+                                CODE: {selectedStateCode}
+                              </span>
+                              <span className={isDark ? 'rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-medium text-zinc-400' : 'rounded-md border border-zinc-200 bg-white px-2 py-0.5 text-[10px] font-medium text-zinc-500'}>
+                                {selectedStateDistricts.length} Districts
+                              </span>
+                            </div>
+                          </div>
 
-                          <div className="mt-3 max-h-64 space-y-2 overflow-y-auto pr-1">
+                          <div className="flex-1 overflow-y-auto p-3 space-y-1.5 custom-scrollbar">
                             {selectedStateDistricts.map((district) => {
                               const active = district === selectedDistrict
                               return (
@@ -926,28 +1285,31 @@ function DashboardPage({
                                   onClick={() => setSelectedDistrict(district)}
                                   className={active
                                     ? isDark
-                                      ? 'w-full rounded-xl border border-green-300/50 bg-green-500/20 px-3 py-2 text-left text-xs font-semibold text-green-100'
-                                      : 'w-full rounded-xl border border-green-400 bg-green-100 px-3 py-2 text-left text-xs font-semibold text-green-800'
+                                      ? 'group flex w-full items-center justify-between rounded-xl border border-emerald-500/50 bg-emerald-500/10 px-4 py-3 text-left text-sm font-semibold text-emerald-100 shadow-[0_0_15px_rgba(16,185,129,0.1)] transition-all'
+                                      : 'group flex w-full items-center justify-between rounded-xl border border-emerald-500 bg-emerald-50 px-4 py-3 text-left text-sm font-semibold text-emerald-800 shadow-sm transition-all'
                                     : isDark
-                                      ? 'w-full rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2 text-left text-xs text-zinc-300 hover:border-green-300/30'
-                                      : 'w-full rounded-xl border border-zinc-300 bg-zinc-100 px-3 py-2 text-left text-xs text-zinc-700 hover:border-green-300'}
+                                      ? 'group flex w-full items-center justify-between rounded-xl border border-transparent bg-transparent px-4 py-3 text-left text-sm text-zinc-400 transition-all hover:bg-white/5 hover:text-zinc-200'
+                                      : 'group flex w-full items-center justify-between rounded-xl border border-transparent bg-transparent px-4 py-3 text-left text-sm text-zinc-600 transition-all hover:bg-zinc-100 hover:text-zinc-900'}
                                 >
                                   {district}
+                                  {active && <MapPin className="h-4 w-4 drop-shadow-md text-emerald-400" />}
                                 </button>
                               )
                             })}
                           </div>
 
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setIsMapPickerOpen(false)
-                              fetchRegionWeather()
-                            }}
-                            className={isDark ? 'mt-4 w-full rounded-full border border-green-300/40 bg-green-500/20 px-4 py-2.5 text-xs font-bold font-heading text-green-100 hover:bg-green-500/30' : 'mt-4 w-full rounded-full border border-green-300 bg-green-100 px-4 py-2.5 text-xs font-bold font-heading text-green-800 hover:bg-green-200'}
-                          >
-                            Use this region
-                          </button>
+                          <div className={isDark ? 'p-4 border-t border-white/10 bg-black/40' : 'p-4 border-t border-zinc-200 bg-white'}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsMapPickerOpen(false)
+                                fetchRegionWeather()
+                              }}
+                              className={isDark ? 'relative flex w-full items-center justify-center gap-2 overflow-hidden rounded-full border border-emerald-500/30 bg-emerald-500/20 px-4 py-3 text-sm font-extrabold font-heading text-emerald-100 shadow-[0_0_20px_rgba(16,185,129,0.2)] transition-all hover:bg-emerald-500/30 hover:shadow-[0_0_30px_rgba(16,185,129,0.3)]' : 'relative flex w-full items-center justify-center gap-2 overflow-hidden rounded-full border border-emerald-600/30 bg-emerald-100 px-4 py-3 text-sm font-extrabold font-heading text-emerald-800 shadow-sm transition-all hover:bg-emerald-200 hover:border-emerald-600'}
+                            >
+                              Confirm & Fetch Weather <ChevronRight className="h-4 w-4" />
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </Motion.div>
@@ -970,55 +1332,56 @@ function DashboardPage({
             initial={{ opacity: 0, x: 22 }}
             whileInView={{ opacity: 1, x: 0 }}
             viewport={{ once: true }}
-            className={isDark ? 'rounded-[2.5rem] border border-white/5 bg-white/[0.03] backdrop-blur-2xl p-10 backdrop-blur-xl' : 'rounded-[2.5rem] border border-zinc-200 bg-white p-10'}
+            transition={{ ease: [0.16, 1, 0.3, 1], duration: 0.8 }}
+            className={isDark ? 'rounded-[2rem] border border-white/5 bg-white/[0.03] backdrop-blur-2xl p-8' : 'rounded-[2rem] border border-zinc-200 bg-white p-8'}
           >
-            <h3 className={isDark ? 'text-3xl lg:text-4xl font-extrabold font-heading tracking-tight text-white' : 'text-3xl lg:text-4xl font-extrabold font-heading tracking-tight text-zinc-900'}>Decision output</h3>
-            <p className={isDark ? 'mt-2 text-sm text-zinc-300' : 'mt-2 text-sm text-zinc-600'}>
+            <h3 className={isDark ? 'text-2xl lg:text-3xl font-extrabold font-heading tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-emerald-200' : 'text-2xl lg:text-3xl font-extrabold font-heading tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-emerald-600 to-emerald-400'}>Decision output</h3>
+            <p className={isDark ? 'mt-2 text-[13px] text-zinc-300' : 'mt-2 text-[13px] text-zinc-600'}>
               Live underwriting output based on the risk inputs at this section.
             </p>
 
-            <div className="mt-5 grid grid-cols-2 gap-8">
-              <div className={isDark ? 'rounded-[2rem] bg-white/[0.02] backdrop-blur-3xl shadow-[0_8px_32px_rgba(0,0,0,0.8)] border border-white/[0.05] p-8' : 'rounded-[2rem] border border-zinc-200 bg-white p-8'}>
-                <p className={isDark ? 'text-xs text-zinc-400' : 'text-xs text-zinc-500'}>Risk score</p>
-                <p className={isDark ? 'mt-2 text-4xl lg:text-5xl font-black font-mono tracking-tighter text-white' : 'mt-2 text-4xl lg:text-5xl font-black font-mono tracking-tighter text-zinc-900'}><AnimatedNumber value={result.riskScore} /></p>
+            <div className="mt-5 grid grid-cols-2 gap-4">
+              <div className={isDark ? 'rounded-[1.5rem] bg-white/[0.02] backdrop-blur-3xl shadow-[0_8px_32px_rgba(0,0,0,0.8)] border border-white/[0.05] p-5' : 'rounded-[1.5rem] border border-zinc-200 bg-white p-5'}>
+                <p className={isDark ? 'text-[11px] font-bold font-heading uppercase text-zinc-400 tracking-wider' : 'text-[11px] font-bold font-heading uppercase text-zinc-500 tracking-wider'}>Risk score</p>
+                <p className={isDark ? 'mt-1 text-3xl font-black font-mono tracking-tighter text-white' : 'mt-1 text-3xl font-black font-mono tracking-tighter text-zinc-900'}><AnimatedNumber value={result.riskScore} /></p>
               </div>
-              <div className={isDark ? 'rounded-[2rem] bg-white/[0.02] backdrop-blur-3xl shadow-[0_8px_32px_rgba(0,0,0,0.8)] border border-white/[0.05] p-8' : 'rounded-[2rem] border border-zinc-200 bg-white p-8'}>
-                <p className={isDark ? 'text-xs text-zinc-400' : 'text-xs text-zinc-500'}>Risk level</p>
-                <p className={isDark ? 'mt-2 text-4xl lg:text-5xl font-black font-mono tracking-tighter text-white' : 'mt-2 text-4xl lg:text-5xl font-black font-mono tracking-tighter text-zinc-900'}>{result.risk}</p>
+              <div className={isDark ? 'rounded-[1.5rem] bg-white/[0.02] backdrop-blur-3xl shadow-[0_8px_32px_rgba(0,0,0,0.8)] border border-white/[0.05] p-5' : 'rounded-[1.5rem] border border-zinc-200 bg-white p-5'}>
+                <p className={isDark ? 'text-[11px] font-bold font-heading uppercase text-zinc-400 tracking-wider' : 'text-[11px] font-bold font-heading uppercase text-zinc-500 tracking-wider'}>Risk level</p>
+                <p className={isDark ? 'mt-1 text-3xl font-black font-mono tracking-tighter text-white' : 'mt-1 text-3xl font-black font-mono tracking-tighter text-zinc-900'}>{result.risk}</p>
               </div>
-              <div className={isDark ? 'rounded-[2rem] bg-white/[0.02] backdrop-blur-3xl shadow-[0_8px_32px_rgba(0,0,0,0.8)] border border-white/[0.05] p-8' : 'rounded-[2rem] border border-zinc-200 bg-white p-8'}>
-                <p className={isDark ? 'text-xs text-zinc-400' : 'text-xs text-zinc-500'}>Premium</p>
-                <p className={isDark ? 'mt-2 text-4xl lg:text-5xl font-black font-mono tracking-tighter text-white' : 'mt-2 text-4xl lg:text-5xl font-black font-mono tracking-tighter text-zinc-900'}><AnimatedNumber value={result.premium} prefix="Rs " /></p>
+              <div className={isDark ? 'rounded-[1.5rem] bg-white/[0.02] backdrop-blur-3xl shadow-[0_8px_32px_rgba(0,0,0,0.8)] border border-white/[0.05] p-5' : 'rounded-[1.5rem] border border-zinc-200 bg-white p-5'}>
+                <p className={isDark ? 'text-[11px] font-bold font-heading uppercase text-zinc-400 tracking-wider' : 'text-[11px] font-bold font-heading uppercase text-zinc-500 tracking-wider'}>Premium</p>
+                <p className={isDark ? 'mt-1 text-3xl font-black font-mono tracking-tighter text-white' : 'mt-1 text-3xl font-black font-mono tracking-tighter text-zinc-900'}><AnimatedNumber value={result.premium} prefix="Rs " /></p>
               </div>
-              <div className={isDark ? 'rounded-[2rem] bg-white/[0.02] backdrop-blur-3xl shadow-[0_8px_32px_rgba(0,0,0,0.8)] border border-white/[0.05] p-8' : 'rounded-[2rem] border border-zinc-200 bg-white p-8'}>
-                <p className={isDark ? 'text-xs text-zinc-400' : 'text-xs text-zinc-500'}>Recommended payout</p>
-                <p className={isDark ? 'mt-2 text-4xl lg:text-5xl font-black font-mono tracking-tighter text-green-300' : 'mt-2 text-4xl lg:text-5xl font-black font-mono tracking-tighter text-green-600'}><AnimatedNumber value={result.payout} prefix="Rs " /></p>
+              <div className={isDark ? 'rounded-[1.5rem] bg-emerald-500/5 backdrop-blur-3xl shadow-[0_8px_32px_rgba(0,0,0,0.8)] border border-emerald-500/20 p-5' : 'rounded-[1.5rem] border border-emerald-200 bg-emerald-50 p-5'}>
+                <p className={isDark ? 'text-[11px] font-bold font-heading uppercase text-emerald-400/80 tracking-wider' : 'text-[11px] font-bold font-heading uppercase text-emerald-600/80 tracking-wider'}>Recommended payout</p>
+                <p className={isDark ? 'mt-1 text-3xl font-black font-mono tracking-tighter text-emerald-400' : 'mt-1 text-3xl font-black font-mono tracking-tighter text-emerald-600'}><AnimatedNumber value={result.payout} prefix="Rs " /></p>
               </div>
             </div>
 
-            <div className={isDark ? 'mt-5 rounded-[1.5rem] border border-green-300/20 bg-green-200/10 p-8' : 'mt-5 rounded-[1.5rem] border border-green-200 bg-green-50 p-8'}>
-              <p className={isDark ? 'text-xs font-bold font-heading uppercase tracking-wider text-green-200' : 'text-xs font-bold font-heading uppercase tracking-wider text-green-800'}>Disruption alerts</p>
-              <ul className={isDark ? 'mt-3 space-y-2 text-sm text-green-100/90' : 'mt-3 space-y-2 text-sm text-green-900'}>
+            <div className={isDark ? 'mt-4 rounded-[1.25rem] border border-green-300/20 bg-green-200/5 p-5' : 'mt-4 rounded-[1.25rem] border border-green-200 bg-green-50 p-5'}>
+              <p className={isDark ? 'text-xs font-bold font-heading uppercase tracking-wider text-green-300' : 'text-xs font-bold font-heading uppercase tracking-wider text-green-800'}>Disruption alerts</p>
+              <ul className={isDark ? 'mt-2 space-y-1.5 text-[13px] text-green-100/90' : 'mt-2 space-y-1.5 text-[13px] text-green-900'}>
                 {result.alerts.map((alert) => (
                   <li key={alert} className="flex items-start gap-2">
-                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {alert}
+                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {alert}
                   </li>
                 ))}
               </ul>
             </div>
 
-            <div className={isDark ? 'mt-4 rounded-[1.5rem] border border-amber-300/20 bg-amber-100/10 p-8' : 'mt-4 rounded-[1.5rem] border border-amber-200 bg-amber-50 p-8'}>
-              <p className={isDark ? 'text-xs font-bold font-heading uppercase tracking-wider text-amber-200' : 'text-xs font-bold font-heading uppercase tracking-wider text-amber-800'}>Fraud detection</p>
+            <div className={isDark ? 'mt-4 rounded-[1.25rem] border border-amber-300/20 bg-amber-100/5 p-5' : 'mt-4 rounded-[1.25rem] border border-amber-200 bg-amber-50 p-5'}>
+              <p className={isDark ? 'text-xs font-bold font-heading uppercase tracking-wider text-amber-300' : 'text-xs font-bold font-heading uppercase tracking-wider text-amber-800'}>Fraud & Spoofing defense</p>
               {result.fraudSignals.length ? (
-                <ul className={isDark ? 'mt-3 space-y-2 text-sm text-amber-50/95' : 'mt-3 space-y-2 text-sm text-amber-900'}>
+                <ul className={isDark ? 'mt-2 space-y-1.5 text-[13px] text-amber-100/90' : 'mt-2 space-y-1.5 text-[13px] text-amber-900'}>
                   {result.fraudSignals.map((signal) => (
                     <li key={signal} className="flex items-start gap-2">
-                      <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" /> {signal}
+                      <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {signal}
                     </li>
                   ))}
                 </ul>
               ) : (
-                <p className={isDark ? 'mt-3 text-sm text-amber-50/90' : 'mt-3 text-sm text-amber-900'}>No anomaly detected for the selected run.</p>
+                <p className={isDark ? 'mt-2 text-[13px] text-amber-100/70' : 'mt-2 text-[13px] text-amber-900/70'}>No anomaly detected. Request clears structural integrity checks.</p>
               )}
             </div>
           </Motion.div>
@@ -1027,7 +1390,7 @@ function DashboardPage({
 
       <section id="coverage" className="relative py-20">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <h2 className={isDark ? 'text-4xl lg:text-5xl font-extrabold font-heading tracking-tight text-white sm:text-5xl lg:text-7xl tracking-tight font-heading' : 'text-4xl lg:text-5xl font-extrabold font-heading tracking-tight text-zinc-900 sm:text-5xl lg:text-7xl tracking-tight font-heading'}>Weekly coverage plans</h2>
+          <h2 className={isDark ? 'text-4xl lg:text-5xl font-extrabold font-heading tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-white to-zinc-400 sm:text-5xl lg:text-6xl mb-4' : 'text-4xl lg:text-5xl font-extrabold font-heading tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-zinc-900 to-zinc-500 sm:text-5xl lg:text-6xl mb-4'}>Weekly coverage plans</h2>
           <p className={isDark ? 'mt-3 max-w-3xl text-zinc-300' : 'mt-3 max-w-3xl text-zinc-700'}>
             Plans are fixed weekly subscriptions. Trigger payout is adjusted by disruption severity and activity validation.
           </p>
@@ -1076,7 +1439,7 @@ function DashboardPage({
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="mb-8 flex flex-wrap items-end justify-between gap-8">
             <div>
-              <h2 className={isDark ? 'text-4xl lg:text-5xl font-extrabold font-heading tracking-tight text-white sm:text-5xl lg:text-7xl tracking-tight font-heading' : 'text-4xl lg:text-5xl font-extrabold font-heading tracking-tight text-zinc-900 sm:text-5xl lg:text-7xl tracking-tight font-heading'}>Event history</h2>
+              <h2 className={isDark ? 'text-4xl lg:text-5xl font-extrabold font-heading tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-white to-zinc-400 sm:text-5xl lg:text-6xl mb-2' : 'text-4xl lg:text-5xl font-extrabold font-heading tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-zinc-900 to-zinc-500 sm:text-5xl lg:text-6xl mb-2'}>Event history</h2>
               <p className={isDark ? 'mt-2 text-zinc-300' : 'mt-2 text-zinc-700'}>Recent event outcomes with decision state and payout output.</p>
             </div>
             <span className={isDark ? 'rounded-full border border-white/15 bg-white/[0.03] backdrop-blur-2xl px-4 py-2 text-xs font-bold font-heading text-zinc-200' : 'rounded-full border border-zinc-300 bg-white px-4 py-2 text-xs font-bold font-heading text-zinc-700'}>
@@ -1089,25 +1452,60 @@ function DashboardPage({
               No events recorded yet.
             </div>
           ) : (
-            <div className="grid gap-8">
+            <div className="grid gap-6">
               {claims.map((claim, index) => (
                 <Motion.article
                   key={claim.id}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
+                  initial={{ opacity: 0, y: 10, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
                   transition={{ delay: index * 0.04 }}
-                  className={isDark ? 'rounded-[2rem] border border-white/5 bg-white/[0.03] backdrop-blur-2xl p-5 backdrop-blur-xl' : 'rounded-[2rem] border border-zinc-200 bg-white p-5'}
+                  className={isDark ? 'group relative overflow-hidden rounded-[2rem] border border-white/10 bg-black/40 p-6 backdrop-blur-2xl hover:border-white/20 transition-all duration-300' : 'group relative overflow-hidden rounded-[2rem] border border-zinc-200 bg-white p-6 shadow-sm hover:shadow-md transition-all duration-300'}
                 >
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <p className={isDark ? 'text-sm font-bold font-heading text-white' : 'text-sm font-bold font-heading text-zinc-900'}>{claim.zone}</p>
-                      <p className={isDark ? 'text-xs text-zinc-400' : 'text-xs text-zinc-500'}>{claim.time}</p>
+                  <div className="absolute inset-x-0 -top-px h-px w-1/2 bg-gradient-to-r from-transparent via-emerald-400/50 to-transparent opacity-0 mix-blend-overlay transition-opacity duration-300 group-hover:opacity-100" />
+                  <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-2">
+                        <p className={isDark ? 'text-lg font-bold font-heading text-white tracking-tight' : 'text-lg font-bold font-heading text-zinc-900 tracking-tight'}>{claim.zone}</p>
+                        <span className={statusStyles(claim.decision, isDark) + ' rounded-full border px-3 py-1 text-[11px] uppercase tracking-wider font-extrabold font-heading'}>
+                          {claim.decision.replace('-', ' ')}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 mb-3 text-xs">
+                        <span className={isDark ? 'flex items-center gap-1 text-zinc-400' : 'flex items-center gap-1 text-zinc-500'}>
+                          <MapPin className="h-3 w-3" /> {claim.time}
+                        </span>
+                        {claim.decision === 'manual-review' && (
+                          <span className="flex items-center gap-1 text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 font-medium">
+                            <Lock className="h-3 w-3" /> SLA: 4hrs remaining for Investigator
+                          </span>
+                        )}
+                        {claim.details && claim.details.graceWindowApplied && (
+                          <span className="flex items-center gap-1 text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20 font-medium">
+                            <CloudLightning className="h-3 w-3" /> Grace Window Active (Extreme Weather Exemption)
+                          </span>
+                        )}
+                      </div>
+                      {/* Evidence Tags */}
+                      {claim.details && (
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          <span className={isDark ? 'text-[10px] font-mono px-2 py-1 rounded-md bg-white/5 border border-white/10 text-zinc-400' : 'text-[10px] font-mono px-2 py-1 rounded-md bg-zinc-100 border border-zinc-200 text-zinc-600'}>
+                            Spoof Score: {(claim.details.spoofRiskScore * 100).toFixed(0)}%
+                          </span>
+                          <span className={isDark ? 'text-[10px] font-mono px-2 py-1 rounded-md bg-white/5 border border-white/10 text-zinc-400' : 'text-[10px] font-mono px-2 py-1 rounded-md bg-zinc-100 border border-zinc-200 text-zinc-600'}>
+                            GPS Config: <span className={claim.details.gpsIntegrity === 'low' ? 'text-red-400' : 'text-green-400'}>{claim.details.gpsIntegrity.toUpperCase()}</span>
+                          </span>
+                          <span className={isDark ? 'text-[10px] font-mono px-2 py-1 rounded-md bg-white/5 border border-white/10 text-zinc-400' : 'text-[10px] font-mono px-2 py-1 rounded-md bg-zinc-100 border border-zinc-200 text-zinc-600'}>
+                            Device Trust: <span className={claim.details.deviceTrust === 'blacklisted' ? 'text-red-400' : 'text-green-400'}>{claim.details.deviceTrust.toUpperCase()}</span>
+                          </span>
+                        </div>
+                      )}
                     </div>
-                    <div className="flex items-center gap-3">
-                      <span className={statusStyles(claim.decision, isDark) + ' rounded-full border px-3 py-1 text-xs font-bold font-heading'}>
-                        {claim.decision.replace('-', ' ')}
+                    
+                    <div className="flex flex-col items-end gap-1 shrink-0 bg-emerald-500/5 border border-emerald-500/20 rounded-2xl px-6 py-4">
+                      <span className={isDark ? 'text-xs font-medium text-emerald-400/70 uppercase tracking-widest' : 'text-xs font-medium text-emerald-600/70 uppercase tracking-widest'}>Disbursed</span>
+                      <span className={isDark ? 'text-3xl font-extrabold font-heading text-emerald-400 tracking-tighter' : 'text-3xl font-extrabold font-heading text-emerald-600 tracking-tighter'}>
+                        ₹{claim.payout}
                       </span>
-                      <span className={isDark ? 'text-sm font-bold text-green-300' : 'text-sm font-bold text-green-600'}>Rs {claim.payout}</span>
                     </div>
                   </div>
                 </Motion.article>
@@ -1146,6 +1544,9 @@ export default function App() {
     expectedDeliveries: 18,
     actualDeliveries: 14,
     previousClaims: 1,
+    gpsIntegrity: 'high',
+    deviceTrust: 'trusted',
+    networkReliability: 'good',
   })
 
   const selectedStateCode = useMemo(() => {
